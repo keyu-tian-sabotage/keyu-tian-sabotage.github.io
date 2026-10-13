@@ -226,10 +226,10 @@ figcaption b { color: var(--fg); font-weight: 600; }
 .kp-go a:hover { text-decoration: underline; }
 /* Named witnesses: looping marquee so no name comes first; static wrap when motion is reduced */
 .witness-intro { color: var(--muted); }
-.marquee { position: relative; overflow: hidden; margin: 22px 0 8px; -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); }
-.marquee-track { display: flex; gap: 14px; width: max-content; animation: marquee 38s linear infinite; }
-.marquee:hover .marquee-track, .marquee:focus-within .marquee-track, .marquee.paused .marquee-track { animation-play-state: paused; }
-@keyframes marquee { from { transform: translateX(0); } to { transform: translateX(calc(-50% - 7px)); } }
+.marquee { position: relative; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; cursor: grab; overscroll-behavior-x: contain; margin: 22px 0 8px; -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); }
+.marquee::-webkit-scrollbar { display: none; }
+.marquee.dragging { cursor: grabbing; user-select: none; }
+.marquee-track { display: flex; gap: 14px; width: max-content; }
 .w-card { flex: none; width: 208px; padding: 16px 18px; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; display: flex; flex-direction: column; gap: 6px; }
 .w-name { font-size: 18px; font-weight: 600; line-height: 1.3; }
 .w-role { font-family: var(--sans); font-size: 13px; line-height: 1.45; color: var(--muted); }
@@ -237,7 +237,7 @@ figcaption b { color: var(--fg); font-weight: 600; }
 .w-link:hover { text-decoration: underline; }
 @media (prefers-reduced-motion: reduce) {
   .marquee { -webkit-mask-image: none; mask-image: none; }
-  .marquee-track { animation: none; width: auto; flex-wrap: wrap; }
+  .marquee-track { width: auto; flex-wrap: wrap; }
   .marquee-track [aria-hidden="true"] { display: none; }
 }
 /* Timeline */
@@ -1135,7 +1135,51 @@ sudo mv / sudo chown / sudo chmod  -&gt; replace installed torch files</code></p
       d.querySelectorAll('a').forEach(function (a) { a.tabIndex = -1; });
       track.appendChild(d);
     });
-    box.addEventListener('pointerdown', function () { box.classList.toggle('paused'); });
+    var reduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduced) return;                                     // static, manually scrollable list
+    var SPEED = 70;                                          // px per second
+    var pos = 0, last = 0, idleUntil = 0, hover = false, drag = null;
+    function half() { var n = cards.length; return track.children[n] ? track.children[n].offsetLeft - track.children[0].offsetLeft : 0; }
+    function wrap() {
+      var h = half(); if (!h) return;
+      if (box.scrollLeft >= h) box.scrollLeft -= h;
+      else if (box.scrollLeft <= 0) box.scrollLeft += h;
+    }
+    function pauseFor(ms) { idleUntil = performance.now() + ms; }
+    function tick(now) {
+      var dt = last ? (now - last) / 1000 : 0; last = now;
+      if (!hover && !drag && now > idleUntil && box.offsetParent !== null) {
+        var h = half();
+        pos += SPEED * dt; if (h && pos >= h) pos -= h;       // keep a fractional position so slow frames still move
+        box.scrollLeft = pos;
+      } else {
+        pos = box.scrollLeft;
+      }
+      requestAnimationFrame(tick);
+    }
+    box.addEventListener('mouseenter', function () { hover = true; });
+    box.addEventListener('mouseleave', function () { hover = false; });
+    box.addEventListener('touchstart', function () { pauseFor(2500); }, { passive: true });
+    box.addEventListener('wheel', function () { pauseFor(2000); }, { passive: true });
+    box.addEventListener('scroll', function () { if (drag || performance.now() < idleUntil) wrap(); }, { passive: true });
+    box.addEventListener('pointerdown', function (e) {               // mouse drag (touch uses native swipe)
+      if (e.pointerType !== 'mouse' || e.button !== 0) return;
+      drag = { x: e.clientX, left: box.scrollLeft, moved: 0 };
+      box.classList.add('dragging');
+    });
+    window.addEventListener('pointermove', function (e) {
+      if (!drag) return;
+      var dx = e.clientX - drag.x; drag.moved = Math.max(drag.moved, Math.abs(dx));
+      box.scrollLeft = drag.left - dx; wrap();
+      if (box.scrollLeft !== drag.left - dx) { drag.left = box.scrollLeft + dx; }
+    });
+    window.addEventListener('pointerup', function () {
+      if (!drag) return;
+      box.classList.remove('dragging');
+      var moved = drag.moved; drag = null; pauseFor(1500);
+      if (moved > 6) { box.addEventListener('click', function stop(ev) { ev.preventDefault(); ev.stopPropagation(); box.removeEventListener('click', stop, true); }, true); }
+    });
+    requestAnimationFrame(tick);
   });
 })();
 </script>
